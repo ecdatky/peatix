@@ -2,7 +2,7 @@
 """Peatix「RIK SQUARE! 2026」の参加者リストをダウンロードし、確認用シート付きxlsxに整形する。
 使い方: python3 fetch_peatix_csv.py <出力先ディレクトリ>
 環境変数 PEATIX_USER / PEATIX_PASSWORD が必要。"""
-import csv, io, os, re, sys, unicodedata
+import csv, io, os, re, sys, unicodedata, zipfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from openpyxl import Workbook
@@ -74,4 +74,11 @@ for r in data:
 
 out = os.path.join(out_dir, f"participants_{now:%Y%m%d_%H%M}.xlsx")
 wb.save(out)
+
+# 無圧縮ZIPに詰め直す(メール添付をbase64で受け渡す際の転記ミスに強くするため)
+with zipfile.ZipFile(out) as zin:
+    items = [(i.filename, zin.read(i.filename)) for i in zin.infolist()]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zout:
+    for name, blob in items:
+        zout.writestr(name, blob)
 print(out)
