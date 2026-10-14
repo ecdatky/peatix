@@ -39,11 +39,32 @@ def fmt_zip(v):
     return f"{d[:3]}-{d[3:]}" if len(d) == 7 else v
 
 
+# 市外局番が3桁の主な地域(それ以外の固定電話は4桁として扱う簡易判定。ハイフン済みの値は触らない)
+AREA3 = {"011", "015", "017", "018", "019", "022", "023", "024", "025", "026", "027", "028", "029", "042", "043", "044",
+         "045", "046", "047", "048", "049", "052", "053", "055", "058", "059", "072", "073", "075", "076", "077", "078",
+         "079", "082", "083", "084", "086", "087", "088", "089", "092", "093", "095", "096", "097", "098", "099"}
+
+
+def fmt_tel(v):
+    if "-" in v or "－" in v or "ー" in v:
+        return v
+    d = re.sub(r"\D", "", unicodedata.normalize("NFKC", v))
+    if len(d) == 11 and d[:3] in ("070", "080", "090", "050", "020"):
+        return f"{d[:3]}-{d[3:7]}-{d[7:]}"
+    if len(d) == 10 and d.startswith("0120"):
+        return f"{d[:4]}-{d[4:7]}-{d[7:]}"
+    if len(d) == 10 and d[:2] in ("03", "06"):
+        return f"{d[:2]}-{d[2:6]}-{d[6:]}"
+    if len(d) == 10 and d[0] == "0":
+        return f"{d[:3]}-{d[3:6]}-{d[6:]}" if d[:3] in AREA3 else f"{d[:4]}-{d[4:6]}-{d[6:]}"
+    return v
+
+
 def col(n):
     return chr(65 + n)
 
 
-def sheet_xml(rows, header_style=None, widths=None, freeze=False):
+def sheet_xml(rows, header_style=None, widths=None, freeze=False, style_fn=None):
     """最小限のシートXML(インライン文字列・UTF-8)。header_style: 1行目に当てるスタイル番号。"""
     out = ['<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">']
     if freeze:
@@ -56,7 +77,8 @@ def sheet_xml(rows, header_style=None, widths=None, freeze=False):
         for c, v in enumerate(row):
             if v == "":
                 continue
-            st = f' s="{header_style}"' if r == 1 and header_style else ""
+            sid = header_style if r == 1 and header_style else (style_fn(r, c, v) if style_fn else 0)
+            st = f' s="{sid}"' if sid else ""
             if isinstance(v, int):
                 out.append(f'<c r="{col(c)}{r}"{st}><v>{v}</v></c>')
             else:
@@ -74,10 +96,14 @@ def width(vals):
 # 確認用シート: チケット番号以降の列だけ残し、郵便番号をハイフン入りに、見出しに色を付ける
 start = header.index("チケット番号")
 ci_zip = header.index("郵便番号") - start
+ci_tel = header.index("電話番号") - start
+ci_party = len(header) - 1 - start  # 懇親会の列(最終列)
+assert header[-1].startswith("懇親会"), header[-1]
 check = [header[start:]]
 for r in data:
     row = r[start:]
     row[ci_zip] = fmt_zip(row[ci_zip])
+    row[ci_tel] = fmt_tel(row[ci_tel])
     check.append(row)
 widths = [width([r[i] for r in check]) for i in range(len(check[0]))]
 
@@ -93,8 +119,8 @@ parts = {
     "_rels/.rels": X + f'<Relationships xmlns="{NS}package/2006/relationships"><Relationship Id="rId1" Type="{NS}officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
     "xl/workbook.xml": X + f'<workbook xmlns="{NS}spreadsheetml/2006/main" xmlns:r="{NS}officeDocument/2006/relationships"><sheets><sheet name="確認用" sheetId="1" r:id="rId1"/><sheet name="participants{now:%Y%m%d}" sheetId="2" r:id="rId2"/></sheets></workbook>',
     "xl/_rels/workbook.xml.rels": X + f'<Relationships xmlns="{NS}package/2006/relationships"><Relationship Id="rId1" Type="{NS}officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="{NS}officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="{NS}officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
-    "xl/styles.xml": X + f'<styleSheet xmlns="{NS}spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><color rgb="FF000000"/><name val="游ゴシック"/><family val="3"/><charset val="128"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFBDD7EE"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>',
-    "xl/worksheets/sheet1.xml": X + sheet_xml(check, header_style=1, widths=widths, freeze=True),
+    "xl/styles.xml": X + f'<styleSheet xmlns="{NS}spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><color rgb="FF000000"/><name val="游ゴシック"/><family val="3"/><charset val="128"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFBDD7EE"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE2EFDA"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>',
+    "xl/worksheets/sheet1.xml": X + sheet_xml(check, header_style=1, widths=widths, freeze=True, style_fn=lambda r, c, v: 2 if c == ci_party and v == "参加する" else 0),
     "xl/worksheets/sheet2.xml": X + sheet_xml(raw),
 }
 out = os.path.join(out_dir, f"participants_{now:%Y%m%d_%H%M}.xlsx")
