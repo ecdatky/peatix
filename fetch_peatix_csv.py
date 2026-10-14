@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Peatix「RIK SQUARE! 2026」の参加者リストをダウンロードし、確認用シート付きxlsxに整形する。
 使い方: python3 fetch_peatix_csv.py <出力先ディレクトリ>
-環境変数 PEATIX_USER / PEATIX_PASSWORD が必要。"""
-import csv, io, os, re, sys, unicodedata, zipfile
+環境変数 PEATIX_USER / PEATIX_PASSWORD が必要。
+TEAMS_UPLOAD_URL(Power Automateの HTTP トリガーURL)があれば、xlsxと参加者数をPOSTして Teams に投稿する。"""
+import base64, csv, io, json, os, re, sys, unicodedata, urllib.request, zipfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from playwright.sync_api import sync_playwright
@@ -135,3 +136,12 @@ active = [r for r in data if "キャンセル" not in r[status_i] and "cancel" n
 today = now.strftime("%Y-%m-%d")
 added = sum(1 for r in active if r[date_i][:10] >= today)
 print(f"COUNT total={len(active)} delta={added}")
+
+# Power Automate(HTTP受信 → SharePoint保存 → Teamsカード投稿)へ送信
+url = os.environ.get("TEAMS_UPLOAD_URL")
+if url:
+    body = json.dumps({"filename": os.path.basename(out), "contentBase64": base64.b64encode(open(out, "rb").read()).decode(),
+                       "total": len(active), "delta": added}).encode()
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=90) as r:
+        print(f"POST status={r.status}")
