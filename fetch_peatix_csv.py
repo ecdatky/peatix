@@ -7,7 +7,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, PatternFill
-from openpyxl.styles.colors import Color
 from playwright.sync_api import sync_playwright
 
 EVENT = "5227975"
@@ -54,7 +53,7 @@ for r in data:
     row = r[start:]
     row[ci_zip] = fmt_zip(row[ci_zip])
     ws.append(row)
-fill = PatternFill("solid", fgColor=Color(theme=3, tint=0.8999908444471572))
+fill = PatternFill("solid", fgColor="D9E1F2")
 for c in ws[1]:
     c.fill = fill
 for col in ws.columns:
@@ -75,10 +74,14 @@ for r in data:
 out = os.path.join(out_dir, f"participants_{now:%Y%m%d_%H%M}.xlsx")
 wb.save(out)
 
-# 無圧縮ZIPに詰め直す(メール添付をbase64で受け渡す際の転記ミスに強くするため)
+# テーマ無し・最大圧縮に詰め直す(メール添付をbase64で受け渡す際の転記量を減らすため、できるだけ小さくする)
 with zipfile.ZipFile(out) as zin:
-    items = [(i.filename, zin.read(i.filename)) for i in zin.infolist()]
-with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zout:
+    items = [(i.filename, zin.read(i.filename)) for i in zin.infolist() if i.filename != "xl/theme/theme1.xml"]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zout:
     for name, blob in items:
+        if name == "xl/_rels/workbook.xml.rels":
+            blob = re.sub(rb"<Relationship [^>]*theme[^>]*/>", b"", blob)
+        if name == "[Content_Types].xml":
+            blob = re.sub(rb"<Override [^>]*theme[^>]*/>", b"", blob)
         zout.writestr(name, blob)
 print(out)
