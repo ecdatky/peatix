@@ -73,17 +73,17 @@ def sheet_xml(rows, header_style=None, widths=None, freeze=False, style_fn=None)
         out.append("<cols>" + "".join(f'<col min="{i+1}" max="{i+1}" width="{w}" customWidth="1"/>' for i, w in enumerate(widths)) + "</cols>")
     out.append("<sheetData>")
     for r, row in enumerate(rows, 1):
-        out.append(f'<row r="{r}">')
+        out.append("<row>")
         for c, v in enumerate(row):
-            if v == "":
-                continue
             sid = header_style if r == 1 and header_style else (style_fn(r, c, v) if style_fn else 0)
             st = f' s="{sid}"' if sid else ""
-            if isinstance(v, int):
-                out.append(f'<c r="{col(c)}{r}"{st}><v>{v}</v></c>')
+            if v == "":
+                out.append(f"<c{st}/>")  # r属性を省いて順番で位置を決めるため、空セルも1つ書く
+            elif isinstance(v, int):
+                out.append(f"<c{st}><v>{v}</v></c>")
             else:
                 t = v.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                out.append(f'<c r="{col(c)}{r}"{st} t="inlineStr"><is><t xml:space="preserve">{t}</t></is></c>')
+                out.append(f'<c{st} t="inlineStr"><is><t>{t}</t></is></c>')
         out.append("</row>")
     out.append("</sheetData></worksheet>")
     return "".join(out)
@@ -124,7 +124,7 @@ parts = {
     "xl/worksheets/sheet2.xml": X + sheet_xml(raw),
 }
 out = os.path.join(out_dir, f"participants_{now:%Y%m%d_%H%M}.xlsx")
-with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:
     for name, xml in parts.items():
         z.writestr(name, xml.encode("utf-8"))
 print(out)
