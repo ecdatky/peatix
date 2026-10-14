@@ -124,7 +124,7 @@ parts = {
     "xl/worksheets/sheet2.xml": X + sheet_xml(raw),
 }
 out = os.path.join(out_dir, f"participants_{now:%Y%m%d_%H%M}.xlsx")
-with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
     for name, xml in parts.items():
         z.writestr(name, xml.encode("utf-8"))
 print(out)
