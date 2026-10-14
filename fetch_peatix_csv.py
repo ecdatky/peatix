@@ -2,7 +2,7 @@
 """Peatix「RIK SQUARE! 2026」の参加者リストCSVをダウンロードする。
 使い方: python3 fetch_peatix_csv.py <出力先ディレクトリ>
 環境変数 PEATIX_USER / PEATIX_PASSWORD が必要。"""
-import os, sys
+import csv, io, os, sys
 from playwright.sync_api import sync_playwright
 
 EVENT = "5227975"
@@ -23,4 +23,11 @@ with sync_playwright() as p:
         pg.click("text=参加者リスト(CSV)")
     path = os.path.join(out_dir, "participants.csv")
     d.value.save_as(path)
-    print(path)
+
+# Peatix標準はUTF-16LE・タブ区切り。Teams/Excelで開けるようUTF-8(BOM付き)・カンマ区切りに変換する。
+text = open(path, encoding="utf-16").read()
+rows = list(csv.reader(io.StringIO(text, newline=""), delimiter="\t"))
+out = os.path.join(out_dir, "participants_utf8.csv")
+with open(out, "w", encoding="utf-8-sig", newline="") as f:
+    csv.writer(f).writerows(rows)
+print(out)
