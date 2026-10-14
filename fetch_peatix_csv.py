@@ -5,8 +5,6 @@
 import csv, io, os, re, sys, unicodedata, zipfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, PatternFill
 from playwright.sync_api import sync_playwright
 
 EVENT = "5227975"
@@ -34,13 +32,6 @@ rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text, newline="")
 header, data = rows[0], [r for r in rows[1:] if any(r)]
 
 now = datetime.now(ZoneInfo("Asia/Tokyo"))
-wb = Workbook()
-
-# 確認用シート: チケット番号以降の列だけ残し、郵便番号をハイフン入りに、ヘッダーに色を付ける
-ws = wb.active
-ws.title = "確認用"
-start = header.index("チケット番号")
-ci_zip = header.index("郵便番号") - start
 
 
 def fmt_zip(v):
@@ -48,40 +39,66 @@ def fmt_zip(v):
     return f"{d[:3]}-{d[3:]}" if len(d) == 7 else v
 
 
-ws.append(header[start:])
+def col(n):
+    return chr(65 + n)
+
+
+def sheet_xml(rows, header_style=None, widths=None, freeze=False):
+    """最小限のシートXML(インライン文字列・UTF-8)。header_style: 1行目に当てるスタイル番号。"""
+    out = ['<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">']
+    if freeze:
+        out.append('<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>')
+    if widths:
+        out.append("<cols>" + "".join(f'<col min="{i+1}" max="{i+1}" width="{w}" customWidth="1"/>' for i, w in enumerate(widths)) + "</cols>")
+    out.append("<sheetData>")
+    for r, row in enumerate(rows, 1):
+        out.append(f'<row r="{r}">')
+        for c, v in enumerate(row):
+            if v == "":
+                continue
+            st = f' s="{header_style}"' if r == 1 and header_style else ""
+            if isinstance(v, int):
+                out.append(f'<c r="{col(c)}{r}"{st}><v>{v}</v></c>')
+            else:
+                t = v.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                out.append(f'<c r="{col(c)}{r}"{st} t="inlineStr"><is><t xml:space="preserve">{t}</t></is></c>')
+        out.append("</row>")
+    out.append("</sheetData></worksheet>")
+    return "".join(out)
+
+
+def width(vals):
+    return min(max(max((len(v) * (2 if ord(v[0]) > 255 else 1) for v in vals if v), default=0) + 2, 10), 50)
+
+
+# 確認用シート: チケット番号以降の列だけ残し、郵便番号をハイフン入りに、見出しに色を付ける
+start = header.index("チケット番号")
+ci_zip = header.index("郵便番号") - start
+check = [header[start:]]
 for r in data:
     row = r[start:]
     row[ci_zip] = fmt_zip(row[ci_zip])
-    ws.append(row)
-fill = PatternFill("solid", fgColor="D9E1F2")
-for c in ws[1]:
-    c.fill = fill
-for col in ws.columns:
-    w = max(len(str(c.value or "")) * 2 if ord(str(c.value or " ")[0]) > 255 else len(str(c.value or "")) for c in col)
-    ws.column_dimensions[col[0].column_letter].width = min(max(w + 2, 10), 50)
-for row in ws.iter_rows():
-    for c in row:
-        c.alignment = Alignment(vertical="center")
-ws.freeze_panes = "A2"
+    check.append(row)
+widths = [width([r[i] for r in check]) for i in range(len(check[0]))]
 
 # 元データ(CSVそのまま)シート
-raw = wb.create_sheet(f"participants{now:%Y%m%d}")
 int_cols = {header.index(h) for h in ("注文番号", "会員 ID", "枚数")}
-raw.append(header)
-for r in data:
-    raw.append([int(v) if i in int_cols and v.isdigit() else v for i, v in enumerate(r)])
+raw = [header] + [[int(v) if i in int_cols and v.isdigit() else v for i, v in enumerate(r)] for r in data]
 
+# メール添付をbase64で受け渡す際、AIが文字列を転記しても壊れにくいよう、openpyxl等を使わず最小構成で書く
+X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+NS = "http://schemas.openxmlformats.org/"
+parts = {
+    "[Content_Types].xml": X + f'<Types xmlns="{NS}package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
+    "_rels/.rels": X + f'<Relationships xmlns="{NS}package/2006/relationships"><Relationship Id="rId1" Type="{NS}officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+    "xl/workbook.xml": X + f'<workbook xmlns="{NS}spreadsheetml/2006/main" xmlns:r="{NS}officeDocument/2006/relationships"><sheets><sheet name="確認用" sheetId="1" r:id="rId1"/><sheet name="participants{now:%Y%m%d}" sheetId="2" r:id="rId2"/></sheets></workbook>',
+    "xl/_rels/workbook.xml.rels": X + f'<Relationships xmlns="{NS}package/2006/relationships"><Relationship Id="rId1" Type="{NS}officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="{NS}officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="{NS}officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+    "xl/styles.xml": X + f'<styleSheet xmlns="{NS}spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Yu Gothic"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9E1F2"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>',
+    "xl/worksheets/sheet1.xml": X + sheet_xml(check, header_style=1, widths=widths, freeze=True),
+    "xl/worksheets/sheet2.xml": X + sheet_xml(raw),
+}
 out = os.path.join(out_dir, f"participants_{now:%Y%m%d_%H%M}.xlsx")
-wb.save(out)
-
-# テーマ無し・最大圧縮に詰め直す(メール添付をbase64で受け渡す際の転記量を減らすため、できるだけ小さくする)
-with zipfile.ZipFile(out) as zin:
-    items = [(i.filename, zin.read(i.filename)) for i in zin.infolist() if i.filename != "xl/theme/theme1.xml"]
-with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zout:
-    for name, blob in items:
-        if name == "xl/_rels/workbook.xml.rels":
-            blob = re.sub(rb"<Relationship [^>]*theme[^>]*/>", b"", blob)
-        if name == "[Content_Types].xml":
-            blob = re.sub(rb"<Override [^>]*theme[^>]*/>", b"", blob)
-        zout.writestr(name, blob)
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+    for name, xml in parts.items():
+        z.writestr(name, xml.encode("utf-8"))
 print(out)
