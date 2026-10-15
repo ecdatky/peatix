@@ -137,11 +137,48 @@ today = now.strftime("%Y-%m-%d")
 added = sum(1 for r in active if r[date_i][:10] >= today)
 print(f"COUNT total={len(active)} delta={added}")
 
-# Power Automate(HTTP受信 → SharePoint保存 → Teamsカード投稿)へ送信
+# 【参加者リスト】RIK SQUARE!2026.xlsx のテーブル「参加申込」へ反映する行(Peatix由来の列だけ。手入力列は送らない)
+# 担当営業所は SharePoint「来場者」フォルダの 都道府県別_担当営業所一覧.xlsx の内容
+OFFICE = dict(zip(
+    "北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県 茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県 新潟県 富山県 "
+    "石川県 福井県 山梨県 長野県 岐阜県 静岡県 愛知県 三重県 滋賀県 京都府 大阪府 兵庫県 奈良県 和歌山県 鳥取県 島根県 "
+    "岡山県 広島県 山口県 徳島県 香川県 愛媛県 高知県 福岡県 佐賀県 長崎県 熊本県 大分県 宮崎県 鹿児島県 沖縄県".split(),
+    "東京 仙台 仙台 仙台 仙台 仙台 仙台 東京 東京 東京 東京 東京 東京 東京 東京 名古屋 名古屋 名古屋 東京 東京 名古屋 "
+    "名古屋 名古屋 名古屋 大阪 大阪 大阪 大阪 大阪 大阪 広島 広島 広島 広島 広島 大阪 大阪 広島 大阪 福岡 福岡 福岡 福岡 "
+    "福岡 福岡 福岡 福岡".split()))
+H = {h: header.index(h) for h in header}
+ind = next(h for h in header if h.startswith("業種"))
+other = next(h for h in header if "その他" in h)
+master = []
+for r in data:
+    pref = unicodedata.normalize("NFKC", r[H["住所（都道府県）"]]).strip()
+    master.append({
+        "チケット番号": "No." + r[H["チケット番号"]].lstrip("#"),  # Power Automate の行キー(# はURLで壊れるため外す)
+        "完了時刻": r[H["申込日"]].replace("T", " ")[:16].replace("-", "/"),
+        "担当営業所": OFFICE.get(pref, ""),
+        "会社名": r[H["会社・団体・学校名"]],
+        "申込ご担当者": f'{r[H["名前（姓）"]]} {r[H["名前（名）"]]}'.strip(),
+        "ヨミ": f'{r[H["ヨミ（姓）"]]} {r[H["ヨミ（名）"]]}'.strip(),
+        "部署・役職": r[H["部署・役職"]],
+        "都道府県": pref,
+        "郵便番号": fmt_zip(r[H["郵便番号"]]),
+        "住所": r[H["住所（市区町村・番地・建物まで）"]],
+        "電話番号": fmt_tel(r[H["電話番号"]]),
+        "メールアドレス": r[H["メール"]],
+        "ご参加数": "1人",  # CSVは1チケット=1行
+        "懇親会": r[H[header[-1]]],
+        "業種": r[H[ind]],
+        "業種（その他）": r[H[other]],
+        "ステータス": r[H["ステータス"]],
+    })
+with open(os.path.join(out_dir, "master_rows.json"), "w", encoding="utf-8") as f:
+    json.dump(master, f, ensure_ascii=False, indent=1)
+
+# Power Automate(HTTP受信 → SharePoint保存 → Teamsカード投稿、rows は参加者リストのテーブルへ追加・更新)へ送信
 url = os.environ.get("TEAMS_UPLOAD_URL")
 if url:
     body = json.dumps({"filename": os.path.basename(out), "contentBase64": base64.b64encode(open(out, "rb").read()).decode(),
-                       "total": len(active), "delta": added}).encode()
+                       "total": len(active), "delta": added, "rows": master}).encode()
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=90) as r:
         print(f"POST status={r.status}")
