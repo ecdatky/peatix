@@ -4,7 +4,7 @@
 環境変数 PEATIX_USER / PEATIX_PASSWORD が必要。
 TEAMS_UPLOAD_URL(Power Automateの HTTP トリガーURL)があれば、xlsxと参加者数をPOSTして Teams に投稿する。"""
 import base64, csv, io, json, os, re, sys, unicodedata, urllib.request, zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from playwright.sync_api import sync_playwright
 
@@ -185,8 +185,17 @@ with open(os.path.join(out_dir, "master_rows.json"), "w", encoding="utf-8") as f
 # Power Automate(HTTP受信 → SharePoint保存 → Teamsカード投稿 → Officeスクリプト update_master_list.ts で
 # 参加者リストへ追加・更新し、B1 に updated を書き込む)へ送信
 updated = f"{now.year}年{now.month}月{now.day}日（{'月火水木金土日'[now.weekday()]}）\u3000{now:%H:%M}"
+# 前回の定時実行(8:50 / 13:00 / 17:00)以降に申し込まれたチケットが無ければ送信しない。
+# 実行環境は毎回作り直されるので、前回分を保存せず申込日時で判定する(実行が数分遅れても漏れない側に倒れる)。
+slots = [now.replace(hour=h, minute=m, second=0, microsecond=0) - timedelta(days=d)
+         for d in (1, 0) for h, m in ((8, 50), (13, 0), (17, 0))]
+past = [t for t in slots if t <= now]
+since = past[-2].strftime("%Y-%m-%d %H:%M")  # 直前の定時の1つ前 = 前回実行の時刻
+new_tickets = [r for r in data if r[date_i].replace("T", " ")[:16] >= since]
 url = os.environ.get("TEAMS_UPLOAD_URL")
-if url:
+if not new_tickets and not os.environ.get("FORCE_POST"):
+    print(f"SKIP no new tickets since {since}")
+elif url:
     body = json.dumps({"filename": os.path.basename(out), "contentBase64": base64.b64encode(open(out, "rb").read()).decode(),
                        "total": len(active), "delta": added,
                        "rowsJson": json.dumps(master, ensure_ascii=False), "updated": updated}).encode()
