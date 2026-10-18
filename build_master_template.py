@@ -78,7 +78,7 @@ for i in range(FIRST, end + 1):
     ws.row_dimensions[i].height = 18.75
     for j, h in enumerate(cols, 1):
         c = ws.cell(i, j, r.get(h, "") or None)
-        c.font = font(11, h == "会社名")
+        c.font = font(11, h == "会社名" and r.get(h) != "個人")  # 会社名は太字(「個人」は除く)
         c.alignment = Alignment(vertical="center")
         c.number_format = "@"  # 日時・番号を文字列のまま保つ
         c.border = grid
@@ -96,7 +96,7 @@ ws.conditional_formatting.add(f"{c}{FIRST}:{c}{LAST}", FormulaRule(
     formula=[f'AND(${c}{FIRST}<>"",${c}{FIRST}<>"個人",COUNTIF(${c}${FIRST}:${c}${LAST},${c}{FIRST})>1)'],
     fill=PatternFill("solid", bgColor="FCE4D6")))
 ws.conditional_formatting.add(f"{c}{FIRST}:{c}{LAST}", FormulaRule(
-    formula=[f'${c}{FIRST}="個人"'], fill=PatternFill("solid", bgColor="FFF2CC")))
+    formula=[f'${c}{FIRST}="個人"'], fill=PatternFill("solid", bgColor="FFF2CC"), font=Font(b=False)))  # 追加行も太字にしない
 ws.conditional_formatting.add(f"{m}{FIRST}:{m}{LAST}", FormulaRule(
     formula=[f'AND(${m}{FIRST}<>"",COUNTIF(${m}${FIRST}:${m}${LAST},${m}{FIRST})>1)'],
     fill=PatternFill("solid", bgColor="FFC7CE")))
