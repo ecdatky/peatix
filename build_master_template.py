@@ -30,10 +30,12 @@ ws["A1"] = "RIK SQUARE!2026 お申込状況"
 ws["A1"].font = Font(name="游ゴシック", size=14, bold=True)
 # 集計はテーブル外の固定範囲で数える(行追加でテーブルが伸びても届くよう広めに取る)
 st, kon = "P", "M"  # ステータス列, 懇親会列
-ws["E1"], ws["F1"] = "申込者数", f'=COUNTA({st}3:{st}2000)-COUNTIF({st}3:{st}2000,"*キャンセル*")'
-ws["G1"], ws["H1"] = "懇親会", f'=COUNTIFS({kon}3:{kon}2000,"参加する",{st}3:{st}2000,"<>*キャンセル*")'
+# 社内(会社名にユニマットリックを含む)の申込は数えない
+rik = 'C3:C2000,"<>*ユニマットリック*"'
+ws["E1"], ws["F1"] = "申込者数", f'=COUNTIFS({st}3:{st}2000,"<>",{st}3:{st}2000,"<>*キャンセル*",{rik})'
+ws["G1"], ws["H1"] = "懇親会", f'=COUNTIFS({kon}3:{kon}2000,"参加する",{st}3:{st}2000,"<>*キャンセル*",{rik})'
 ws["J1"] = "キャンセル"
-ws["K1"] = f'=COUNTIF({st}3:{st}2000,"*キャンセル*")'
+ws["K1"] = f'=COUNTIFS({st}3:{st}2000,"*キャンセル*",{rik})'
 for c in ("E1", "F1", "G1", "H1", "J1", "K1"):
     ws[c].font = Font(name="游ゴシック", size=11, bold=True)
 
@@ -56,13 +58,18 @@ ws.row_dimensions[2].height = 32
 ws.freeze_panes = "D3"
 
 # 確認用の色付け(行追加で伸びても効くよう広めに取る)
-# 会社名: 2行以上ある会社はオレンジ、「個人」は黄色 / メールアドレス: 2行以上あれば赤
+# 社内(ユニマットリック)の行は全体をグレー(最優先) / 会社名: 2行以上ある会社はオレンジ、「個人」は黄色
+# メールアドレス: 2行以上あれば赤 / 懇親会: 「参加する」は緑
+ws.conditional_formatting.add(f"A3:{ws.cell(2, len(cols)).column_letter}2000", FormulaRule(
+    formula=['ISNUMBER(SEARCH("ユニマットリック",$C3))'], fill=PatternFill("solid", bgColor="D9D9D9"), stopIfTrue=True))
 ws.conditional_formatting.add("C3:C2000", FormulaRule(
     formula=['AND($C3<>"",$C3<>"個人",COUNTIF($C$3:$C$2000,$C3)>1)'], fill=PatternFill("solid", bgColor="FCE4D6")))
 ws.conditional_formatting.add("C3:C2000", FormulaRule(
     formula=['$C3="個人"'], fill=PatternFill("solid", bgColor="FFF2CC")))
 ws.conditional_formatting.add("K3:K2000", FormulaRule(
     formula=['AND($K3<>"",COUNTIF($K$3:$K$2000,$K3)>1)'], fill=PatternFill("solid", bgColor="FFC7CE")))
+ws.conditional_formatting.add("M3:M2000", FormulaRule(
+    formula=['$M3="参加する"'], fill=PatternFill("solid", bgColor="E2EFDA")))
 
 ref = f"A2:{ws.cell(2, len(cols)).column_letter}{last}"
 t = Table(displayName="参加申込", ref=ref)

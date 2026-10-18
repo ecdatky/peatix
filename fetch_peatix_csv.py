@@ -130,9 +130,17 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         z.writestr(name, xml.encode("utf-8"))
 print(out)
 
-# 参加者数(キャンセルを除く)と、前日末(昨日23:59:59 JST)時点からの増減。申込日で判定するため前日分の保存は不要。
+# 参加者数(キャンセルと社内=ユニマットリックからの申込を除く)と、前日末(昨日23:59:59 JST)時点からの増減。
+# 申込日で判定するため前日分の保存は不要。
 status_i, date_i = header.index("ステータス"), header.index("申込日")
-active = [r for r in data if "キャンセル" not in r[status_i] and "cancel" not in r[status_i].lower()]
+company_i, mail_i = header.index("会社・団体・学校名"), header.index("メール")
+
+
+def internal(r):
+    return "ユニマットリック" in unicodedata.normalize("NFKC", r[company_i]) or r[mail_i].lower().endswith("@rikcorp.jp")
+
+
+active = [r for r in data if "キャンセル" not in r[status_i] and "cancel" not in r[status_i].lower() and not internal(r)]
 today = now.strftime("%Y-%m-%d")
 added = sum(1 for r in active if r[date_i][:10] >= today)
 print(f"COUNT total={len(active)} delta={added}")
