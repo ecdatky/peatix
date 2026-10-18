@@ -55,9 +55,14 @@ for j, h in enumerate(cols, 1):
 ws.row_dimensions[2].height = 32
 ws.freeze_panes = "D3"
 
-# 同じ会社名が2行以上ある会社名セルをオレンジに(「個人」は除く)。行追加で伸びても効くよう広めに取る
+# 確認用の色付け(行追加で伸びても効くよう広めに取る)
+# 会社名: 2行以上ある会社はオレンジ、「個人」は黄色 / メールアドレス: 2行以上あれば赤
 ws.conditional_formatting.add("C3:C2000", FormulaRule(
     formula=['AND($C3<>"",$C3<>"個人",COUNTIF($C$3:$C$2000,$C3)>1)'], fill=PatternFill("solid", bgColor="FCE4D6")))
+ws.conditional_formatting.add("C3:C2000", FormulaRule(
+    formula=['$C3="個人"'], fill=PatternFill("solid", bgColor="FFF2CC")))
+ws.conditional_formatting.add("K3:K2000", FormulaRule(
+    formula=['AND($K3<>"",COUNTIF($K$3:$K$2000,$K3)>1)'], fill=PatternFill("solid", bgColor="FFC7CE")))
 
 ref = f"A2:{ws.cell(2, len(cols)).column_letter}{last}"
 t = Table(displayName="参加申込", ref=ref)
