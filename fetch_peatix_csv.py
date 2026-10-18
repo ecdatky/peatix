@@ -162,7 +162,7 @@ for r in data:
     pref = unicodedata.normalize("NFKC", r[H["住所（都道府県）"]]).strip()
     master.append({
         "チケット番号": "No." + r[H["チケット番号"]].lstrip("#"),  # Power Automate の行キー(# はURLで壊れるため外す)
-        "完了時刻": r[H["申込日"]].replace("T", " ")[:16].replace("-", "/"),
+        "申込日時": r[H["申込日"]].replace("T", " ")[:16].replace("-", "/"),
         "担当営業所": OFFICE.get(pref, ""),
         "会社名": r[H["会社・団体・学校名"]],
         "申込ご担当者": f'{r[H["名前（姓）"]]} {r[H["名前（名）"]]}'.strip(),
@@ -182,11 +182,14 @@ for r in data:
 with open(os.path.join(out_dir, "master_rows.json"), "w", encoding="utf-8") as f:
     json.dump(master, f, ensure_ascii=False, indent=1)
 
-# Power Automate(HTTP受信 → SharePoint保存 → Teamsカード投稿、rows は参加者リストのテーブルへ追加・更新)へ送信
+# Power Automate(HTTP受信 → SharePoint保存 → Teamsカード投稿 → Officeスクリプト update_master_list.ts で
+# 参加者リストへ追加・更新し、B1 に updated を書き込む)へ送信
+updated = f"{now.year}年{now.month}月{now.day}日（{'月火水木金土日'[now.weekday()]}）\u3000{now:%H:%M}"
 url = os.environ.get("TEAMS_UPLOAD_URL")
 if url:
     body = json.dumps({"filename": os.path.basename(out), "contentBase64": base64.b64encode(open(out, "rb").read()).decode(),
-                       "total": len(active), "delta": added, "rows": master}).encode()
+                       "total": len(active), "delta": added,
+                       "rowsJson": json.dumps(master, ensure_ascii=False), "updated": updated}).encode()
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=90) as r:
         print(f"POST status={r.status}")

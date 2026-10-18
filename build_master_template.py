@@ -1,79 +1,108 @@
 #!/usr/bin/env python3
-"""【参加者リスト】RIK SQUARE!2026.xlsx の初期版(2025年の中身を消した新しい器)を作る。初回の1回だけ使う。
+"""【参加者リスト】RIK SQUARE2026.xlsx を作り直す(列構成や書式を変えたときに使う)。
 使い方: python3 build_master_template.py <fetch_peatix_csv.py の出力ディレクトリ> <出力xlsx>
-シート「参加申込リスト」に Excel テーブル「参加申込」を置き、現時点の参加者を入れておく。
-以降は Power Automate が「チケット番号」をキーに、新しい人は行追加、既存の人は Peatix 由来の列だけ更新する。
-「講師」以降の列は手入力用で、自動更新では触らない。"""
+シート「参加申込リスト」の3行目からが Excel テーブル「参加申込」。B1 は最終更新日時。
+以降は Power Automate から Office スクリプト update_master_list.ts を呼び、「チケット番号」をキーに
+新しい人は行追加、既存の人は Peatix 由来の列(ステータス・懇親会)だけ更新し、B1 を書き換える。
+「備考欄」以降の手入力列は自動更新では触らない。"""
 import json, os, sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from openpyxl import Workbook
 from openpyxl.formatting.rule import FormulaRule
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
-AUTO = ["完了時刻", "担当営業所", "会社名", "申込ご担当者", "ヨミ", "部署・役職", "都道府県", "郵便番号", "住所", "電話番号",
-        "メールアドレス", "ご参加数", "懇親会", "業種", "業種（その他）", "ステータス", "チケット番号"]
-MANUAL = ["講師", "卒業生", "備考欄", "新規", "ユーザー", "取引先種類", "情報・商談メモ ※複数申込の場合は話をした方の名前も記載"]
-WIDTH = {"完了時刻": 17, "担当営業所": 11, "会社名": 30, "申込ご担当者": 14, "ヨミ": 16, "部署・役職": 20, "都道府県": 10,
-         "郵便番号": 10, "住所": 36, "電話番号": 15, "メールアドレス": 30, "ご参加数": 9, "懇親会": 11, "業種": 22,
-         "業種（その他）": 20, "ステータス": 11, "チケット番号": 12, "備考欄": 24, "取引先種類": 12, MANUAL[-1]: 40}
+AUTO = ["チケット番号", "担当営業所", "会社名", "申込ご担当者", "部署・役職", "都道府県", "メールアドレス", "電話番号", "ヨミ",
+        "郵便番号", "住所", "ご参加数", "懇親会", "業種", "業種（その他）", "ステータス"]
+MANUAL = ["備考欄", "新規", "ユーザー", "取引先種類", "情報・商談メモ ※複数申込の場合は話をした方の名前も記載"]
+cols = AUTO + MANUAL + ["申込日時"]
+HIDDEN = {"ご参加数", "ステータス"}
+WIDTH = {"チケット番号": 12, "担当営業所": 11, "会社名": 30, "申込ご担当者": 14, "部署・役職": 20, "都道府県": 10,
+         "メールアドレス": 30, "電話番号": 15, "ヨミ": 16, "郵便番号": 10, "住所": 36, "ご参加数": 9, "懇親会": 11, "業種": 22,
+         "業種（その他）": 20, "ステータス": 11, "備考欄": 24, "新規": 9, "ユーザー": 9, "取引先種類": 12, MANUAL[-1]: 40,
+         "申込日時": 17}
+L = {h: chr(65 + i) for i, h in enumerate(cols)}  # 列名 → 列記号(22列なので1文字で足りる)
+FIRST, LAST = 4, 2001  # データ行の範囲(条件付き書式・集計は行追加で伸びても届くよう広めに取る)
 
 rows = json.load(open(os.path.join(sys.argv[1], "master_rows.json"), encoding="utf-8"))
-cols = AUTO + MANUAL
 n = max(len(rows), 1)  # テーブルは最低1行必要
-last = 2 + n
-font = Font(name="游ゴシック", size=11)
+end = FIRST - 1 + n
+now = datetime.now(ZoneInfo("Asia/Tokyo"))
+
+
+def font(sz=11, b=False, color=None):
+    return Font(name="游ゴシック", size=sz, bold=b, color=color)
+
 
 wb = Workbook()
 ws = wb.active
 ws.title = "参加申込リスト"
-ws["A1"] = "RIK SQUARE!2026 お申込状況"
-ws["A1"].font = Font(name="游ゴシック", size=14, bold=True)
-# 集計はテーブル外の固定範囲で数える(行追加でテーブルが伸びても届くよう広めに取る)
-st, kon = "P", "M"  # ステータス列, 懇親会列
-# 社内(会社名にユニマットリックを含む)の申込は数えない
-rik = 'C3:C2000,"<>*ユニマットリック*"'
-ws["E1"], ws["F1"] = "申込者数", f'=COUNTIFS({st}3:{st}2000,"<>",{st}3:{st}2000,"<>*キャンセル*",{rik})'
-ws["G1"], ws["H1"] = "懇親会", f'=COUNTIFS({kon}3:{kon}2000,"参加する",{st}3:{st}2000,"<>*キャンセル*",{rik})'
-ws["J1"] = "キャンセル"
-ws["K1"] = f'=COUNTIFS({st}3:{st}2000,"*キャンセル*",{rik})'
-for c in ("E1", "F1", "G1", "H1", "J1", "K1"):
-    ws[c].font = Font(name="游ゴシック", size=11, bold=True)
+ws["A1"], ws["B1"] = "最終更新日時", f"{now.year}年{now.month}月{now.day}日（{'月火水木金土日'[now.weekday()]}）　{now:%H:%M}"
+ws["A1"].font = ws["B1"].font = font()
+ws["A2"] = "RIK SQUARE!2026 お申込状況"
+ws["A2"].font = font(20, True)
+# 集計(キャンセルと社内=ユニマットリックの申込は数えない)
+st, kon, co = (f"{L[h]}{FIRST}:{L[h]}{LAST}" for h in ("ステータス", "懇親会", "会社名"))
+rik = f'{co},"<>*ユニマットリック*"'
+red = "FFFF0000"
+for addr, v, f, al in (
+        ("E2", "申込者数", font(16, True, red), "right"),
+        ("F2", f'=COUNTIFS({st},"<>",{st},"<>*キャンセル*",{rik})', font(36, True, red), "left"),
+        ("G2", "懇親会", font(16, True, red), "right"),
+        ("H2", f'=COUNTIFS({kon},"参加する",{st},"<>*キャンセル*",{rik})', font(24, True, red), "left"),
+        ("J2", "キャンセル", font(11, True), None),
+        ("K2", f'=COUNTIFS({st},"*キャンセル*",{rik})', font(11, True), None)):
+    ws[addr] = v
+    ws[addr].font = f
+    ws[addr].alignment = Alignment(horizontal=al, vertical="center")
+ws.row_dimensions[2].height = 69.75
 
-for j, h in enumerate(cols, 1):
-    ws.cell(2, j, h)
-for i, r in enumerate(rows, 3):
-    for j, h in enumerate(AUTO, 1):
-        ws.cell(i, j, r.get(h, ""))
-for row in ws.iter_rows(min_row=2, max_row=last, max_col=len(cols)):
-    for c in row:
-        c.font = font
-        c.alignment = Alignment(vertical="center", wrap_text=c.row == 2)
+thin = Side(style="thin", color="BFBFBF")
+grid = Border(left=thin, right=thin, top=thin, bottom=thin)
 manual_fill = PatternFill("solid", fgColor="FFF2CC")  # 手入力列の見出しは黄色で区別
-for j in range(len(AUTO) + 1, len(cols) + 1):
-    ws.cell(2, j).fill = manual_fill
-    ws.cell(2, j).font = Font(name="游ゴシック", size=11, bold=True, color="000000")
 for j, h in enumerate(cols, 1):
-    ws.column_dimensions[ws.cell(2, j).column_letter].width = WIDTH.get(h, 9)
-ws.row_dimensions[2].height = 32
-ws.freeze_panes = "D3"
+    c = ws.cell(3, j, h)
+    c.font = font(11, h in MANUAL, "FF000000" if h in MANUAL else None)
+    c.alignment = Alignment(vertical="center", wrap_text=True)
+    c.border = grid
+    if h in MANUAL:
+        c.fill = manual_fill
+    ws.column_dimensions[L[h]].width = WIDTH.get(h, 9)
+    ws.column_dimensions[L[h]].hidden = h in HIDDEN
+ws.row_dimensions[3].height = 32.1
+for i in range(FIRST, end + 1):
+    r = rows[i - FIRST] if rows else {}
+    ws.row_dimensions[i].height = 18.75
+    for j, h in enumerate(cols, 1):
+        c = ws.cell(i, j, r.get(h, "") or None)
+        c.font = font()
+        c.alignment = Alignment(vertical="center")
+        c.number_format = "@"  # 日時・番号を文字列のまま保つ
+        c.border = grid
+ws.freeze_panes = f"D{FIRST}"
 
-# 確認用の色付け(行追加で伸びても効くよう広めに取る)
-# 社内(ユニマットリック)の行は全体をグレー(最優先) / 会社名: 2行以上ある会社はオレンジ、「個人」は黄色
-# メールアドレス: 2行以上あれば赤 / 懇親会: 「参加する」は緑
-ws.conditional_formatting.add(f"A3:{ws.cell(2, len(cols)).column_letter}2000", FormulaRule(
-    formula=['ISNUMBER(SEARCH("ユニマットリック",$C3))'], fill=PatternFill("solid", bgColor="D9D9D9"), stopIfTrue=True))
-ws.conditional_formatting.add("C3:C2000", FormulaRule(
-    formula=['AND($C3<>"",$C3<>"個人",COUNTIF($C$3:$C$2000,$C3)>1)'], fill=PatternFill("solid", bgColor="FCE4D6")))
-ws.conditional_formatting.add("C3:C2000", FormulaRule(
-    formula=['$C3="個人"'], fill=PatternFill("solid", bgColor="FFF2CC")))
-ws.conditional_formatting.add("K3:K2000", FormulaRule(
-    formula=['AND($K3<>"",COUNTIF($K$3:$K$2000,$K3)>1)'], fill=PatternFill("solid", bgColor="FFC7CE")))
-ws.conditional_formatting.add("M3:M2000", FormulaRule(
-    formula=['$M3="参加する"'], fill=PatternFill("solid", bgColor="E2EFDA")))
+# 条件付き書式(上ほど優先)
+# 薄い罫線(Power Automate で追加される行にも付くよう条件付き書式でも引く) / 社内(ユニマットリック)の行は全体グレー
+# 会社名: 2行以上ある会社はオレンジ、「個人」は黄色 / メールアドレス: 2行以上あれば赤 / 懇親会: 「参加する」は緑
+area = f"A{FIRST}:{L[cols[-1]]}{LAST}"
+c, m, k = L["会社名"], L["メールアドレス"], L["懇親会"]
+ws.conditional_formatting.add(area, FormulaRule(formula=[f'${L["チケット番号"]}{FIRST}<>""'], border=grid))
+ws.conditional_formatting.add(area, FormulaRule(
+    formula=[f'ISNUMBER(SEARCH("ユニマットリック",${c}{FIRST}))'], fill=PatternFill("solid", bgColor="D9D9D9"), stopIfTrue=True))
+ws.conditional_formatting.add(f"{c}{FIRST}:{c}{LAST}", FormulaRule(
+    formula=[f'AND(${c}{FIRST}<>"",${c}{FIRST}<>"個人",COUNTIF(${c}${FIRST}:${c}${LAST},${c}{FIRST})>1)'],
+    fill=PatternFill("solid", bgColor="FCE4D6")))
+ws.conditional_formatting.add(f"{c}{FIRST}:{c}{LAST}", FormulaRule(
+    formula=[f'${c}{FIRST}="個人"'], fill=PatternFill("solid", bgColor="FFF2CC")))
+ws.conditional_formatting.add(f"{m}{FIRST}:{m}{LAST}", FormulaRule(
+    formula=[f'AND(${m}{FIRST}<>"",COUNTIF(${m}${FIRST}:${m}${LAST},${m}{FIRST})>1)'],
+    fill=PatternFill("solid", bgColor="FFC7CE")))
+ws.conditional_formatting.add(f"{k}{FIRST}:{k}{LAST}", FormulaRule(
+    formula=[f'${k}{FIRST}="参加する"'], fill=PatternFill("solid", bgColor="E2EFDA")))
 
-ref = f"A2:{ws.cell(2, len(cols)).column_letter}{last}"
-t = Table(displayName="参加申込", ref=ref)
-t.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+t = Table(displayName="参加申込", ref=f"A3:{L[cols[-1]]}{end}")
+t.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=False)  # 交互の色付けはしない
 ws.add_table(t)
 wb.save(sys.argv[2])
 print(sys.argv[2], f"{len(rows)} rows")
