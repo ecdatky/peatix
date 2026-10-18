@@ -6,6 +6,7 @@
 「講師」以降の列は手入力用で、自動更新では触らない。"""
 import json, os, sys
 from openpyxl import Workbook
+from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
@@ -53,6 +54,10 @@ for j, h in enumerate(cols, 1):
     ws.column_dimensions[ws.cell(2, j).column_letter].width = WIDTH.get(h, 9)
 ws.row_dimensions[2].height = 32
 ws.freeze_panes = "D3"
+
+# 同じ会社名が2行以上ある会社名セルをオレンジに(「個人」は除く)。行追加で伸びても効くよう広めに取る
+ws.conditional_formatting.add("C3:C2000", FormulaRule(
+    formula=['AND($C3<>"",$C3<>"個人",COUNTIF($C$3:$C$2000,$C3)>1)'], fill=PatternFill("solid", bgColor="FCE4D6")))
 
 ref = f"A2:{ws.cell(2, len(cols)).column_letter}{last}"
 t = Table(displayName="参加申込", ref=ref)
