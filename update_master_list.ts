@@ -3,6 +3,7 @@
 //   rowsJson: fetch_peatix_csv.py が送る参加者の配列(JSON文字列)。キーは表の見出し名と同じ。
 //   updated : 最終更新日時の表示文字列。B1 に書き込む。
 // 「チケット番号」が表にない人は末尾に追加し、ある人は「ステータス」「懇親会」だけ更新する。
+// Peatix の CSV から消えたチケット(キャンセル分)は「ステータス」を「キャンセル」にする(行は消さない)。
 // それ以外の列(備考欄・商談メモなどの手入力列)には触らない。
 function main(workbook: ExcelScript.Workbook, rowsJson: string, updated: string) {
   const table = workbook.getTable("参加申込");
@@ -31,6 +32,17 @@ function main(workbook: ExcelScript.Workbook, rowsJson: string, updated: string)
       }
     }
   }
+  // CSV に無くなったチケット = Peatix でキャンセルされた分。取得失敗で大量に消えた場合は誤判定なので触らない。
+  const st = headers.indexOf("ステータス");
+  const incoming = new Set(rows.map(r => r["チケット番号"]));
+  const missing: number[] = [];
+  pos.forEach((i, k) => {
+    if (k.startsWith("No.") && !incoming.has(k) && !String(values[i][st]).includes("キャンセル")) missing.push(i);
+  });
+  let cancelled = 0;
+  if (st >= 0 && rows.length > 0 && missing.length <= Math.max(5, pos.size * 0.1)) {
+    for (const i of missing) { body.getCell(i, st).setValue("キャンセル"); cancelled++; }
+  }
   if (add.length > 0) {
     // 表が空行1行だけの場合はその行を使う
     if (values.length === 1 && values[0].every(v => String(v) === "")) {
@@ -39,5 +51,5 @@ function main(workbook: ExcelScript.Workbook, rowsJson: string, updated: string)
     if (add.length > 0) table.addRows(-1, add);
   }
   table.getWorksheet().getRange("B1").setValue(updated);
-  console.log(`added=${add.length} changed=${changed}`);
+  console.log(`added=${add.length} changed=${changed} cancelled=${cancelled} missing=${missing.length}`);
 }
